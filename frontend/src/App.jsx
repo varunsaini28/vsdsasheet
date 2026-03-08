@@ -5,7 +5,7 @@ import topicsData, {
   getPatternsInOrder, 
   getSources,
   difficulties 
-} from './data/questions.jsx';
+} from './data/questions';
 import Sidebar from './components/Sidebar';
 import QuestionList from './components/QuestionList';
 import StatsModal from './components/StatsModal';
@@ -50,28 +50,70 @@ function App() {
     const loadUserData = async () => {
       try {
         const savedUser = localStorage.getItem('vs-dsa-user');
-        const savedProgress = localStorage.getItem('vs-dsa-progress');
         
         if (savedUser) {
           const userData = JSON.parse(savedUser);
+          console.log('Found saved user:', userData);
           setUser(userData);
           
-          if (savedProgress) {
-            const progressData = JSON.parse(savedProgress);
-            setCompletedQuestions(progressData.completedQuestions || {});
-            setReviewLater(progressData.reviewLater || {});
-            setRevisionDates(progressData.revisionDates || {});
-          }
+          // Fetch fresh progress from backend
+          await fetchUserProgress(userData.userId);
+        } else {
+          setIsLoading(false);
         }
       } catch (error) {
         console.error('Error loading user data:', error);
-      } finally {
         setIsLoading(false);
       }
     };
 
     loadUserData();
   }, []);
+
+  // Fetch user progress from backend
+  const fetchUserProgress = async (userId) => {
+    try {
+      console.log('Fetching progress for user:', userId);
+      const response = await axios.get(`${serverUrl}/api/progress/${userId}`, {
+        headers: { 'user-id': userId }
+      });
+      
+      console.log('Progress response:', response.data);
+      
+      if (response.data) {
+        setCompletedQuestions(response.data.completedQuestions || {});
+        setReviewLater(response.data.reviewLater || {});
+        setRevisionDates(response.data.revisionDates || {});
+        
+        // Also update localStorage with backend data
+        localStorage.setItem('vs-dsa-progress', JSON.stringify({
+          completedQuestions: response.data.completedQuestions || {},
+          reviewLater: response.data.reviewLater || {},
+          revisionDates: response.data.revisionDates || {}
+        }));
+        
+        console.log('Progress loaded successfully:', {
+          completed: Object.keys(response.data.completedQuestions || {}).length,
+          review: Object.keys(response.data.reviewLater || {}).length,
+          revision: Object.keys(response.data.revisionDates || {}).length
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching progress:', error);
+      
+      // If backend fetch fails, try to load from localStorage as fallback
+      const savedProgress = localStorage.getItem('vs-dsa-progress');
+      if (savedProgress) {
+        console.log('Loading progress from localStorage fallback');
+        const progressData = JSON.parse(savedProgress);
+        setCompletedQuestions(progressData.completedQuestions || {});
+        setReviewLater(progressData.reviewLater || {});
+        setRevisionDates(progressData.revisionDates || {});
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     // Sync questions to backend (one-time)
@@ -81,7 +123,7 @@ function App() {
         console.log('Questions synced successfully');
       } catch (error) {
         console.error('Error syncing questions:', error);
-        setApiError('Cannot connect to backend server. Please make sure it\'s running on port 5000.');
+        setApiError('Cannot connect to backend server. Please make sure it\'s running.');
       }
     };
     syncQuestions();
@@ -94,61 +136,16 @@ function App() {
     }
   }, [user]);
 
-  // Save progress to localStorage whenever it changes
-  useEffect(() => {
-    if (user) {
-      const progressData = {
-        completedQuestions,
-        reviewLater,
-        revisionDates
-      };
-      localStorage.setItem('vs-dsa-progress', JSON.stringify(progressData));
-    }
-  }, [completedQuestions, reviewLater, revisionDates, user]);
-
-  const handleLogin = (userData, progressData) => {
-    setUser(userData);
-    if (progressData) {
-      setCompletedQuestions(Object.fromEntries(progressData.completedQuestions || new Map()));
-      setReviewLater(Object.fromEntries(progressData.reviewLater || new Map()));
-      setRevisionDates(Object.fromEntries(progressData.revisionDates || new Map()));
-    }
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setCompletedQuestions({});
-    setReviewLater({});
-    setRevisionDates({});
-    
-    localStorage.removeItem('vs-dsa-user');
-    localStorage.removeItem('vs-dsa-progress');
-  };
-
-  const saveProgress = async (updates) => {
+  const toggleQuestion = async (questionId) => {
     if (!user) return;
     
-    try {
-      await axios.post(`${serverUrl}/api/progress/update`, {
-        completedQuestions,
-        reviewLater,
-        revisionDates,
-        ...updates
-      }, {
-        headers: { 'user-id': user.userId }
-      });
-    } catch (error) {
-      console.error('Error saving progress:', error);
-    }
-  };
-
-  const toggleQuestion = (questionId) => {
     const newCompleted = {
       ...completedQuestions,
       [questionId]: !completedQuestions[questionId]
     };
     
     setCompletedQuestions(newCompleted);
+    console.log(`Toggled question ${questionId}:`, newCompleted[questionId]);
     
     if (!completedQuestions[questionId]) {
       const today = new Date();
@@ -161,22 +158,79 @@ function App() {
       };
       
       setRevisionDates(newRevisionDates);
-      saveProgress({ completedQuestions: newCompleted, revisionDates: newRevisionDates });
+      
+      try {
+        await axios.post(`${serverUrl}/api/progress/update`, {
+          completedQuestions: newCompleted,
+          reviewLater,
+          revisionDates: newRevisionDates
+        }, {
+          headers: { 'user-id': user.userId }
+        });
+        console.log('Progress saved to backend (completed + revision)');
+        
+        localStorage.setItem('vs-dsa-progress', JSON.stringify({
+          completedQuestions: newCompleted,
+          reviewLater,
+          revisionDates: newRevisionDates
+        }));
+      } catch (error) {
+        console.error('Error saving progress:', error);
+      }
     } else {
-      saveProgress({ completedQuestions: newCompleted });
+      try {
+        await axios.post(`${serverUrl}/api/progress/update`, {
+          completedQuestions: newCompleted,
+          reviewLater,
+          revisionDates
+        }, {
+          headers: { 'user-id': user.userId }
+        });
+        console.log('Progress saved to backend (completed only)');
+        
+        localStorage.setItem('vs-dsa-progress', JSON.stringify({
+          completedQuestions: newCompleted,
+          reviewLater,
+          revisionDates
+        }));
+      } catch (error) {
+        console.error('Error saving progress:', error);
+      }
     }
   };
 
-  const toggleReviewLater = (questionId) => {
+  const toggleReviewLater = async (questionId) => {
+    if (!user) return;
+    
     const newReviewLater = {
       ...reviewLater,
       [questionId]: !reviewLater[questionId]
     };
     setReviewLater(newReviewLater);
-    saveProgress({ reviewLater: newReviewLater });
+    
+    try {
+      await axios.post(`${serverUrl}/api/progress/update`, {
+        completedQuestions,
+        reviewLater: newReviewLater,
+        revisionDates
+      }, {
+        headers: { 'user-id': user.userId }
+      });
+      console.log('Review later saved to backend');
+      
+      localStorage.setItem('vs-dsa-progress', JSON.stringify({
+        completedQuestions,
+        reviewLater: newReviewLater,
+        revisionDates
+      }));
+    } catch (error) {
+      console.error('Error saving review later:', error);
+    }
   };
 
-  const markForRevision = (questionId, days) => {
+  const markForRevision = async (questionId, days) => {
+    if (!user) return;
+    
     const today = new Date();
     const nextRevision = new Date(today);
     nextRevision.setDate(today.getDate() + days);
@@ -187,7 +241,67 @@ function App() {
     };
     
     setRevisionDates(newRevisionDates);
-    saveProgress({ revisionDates: newRevisionDates });
+    
+    try {
+      await axios.post(`${serverUrl}/api/progress/update`, {
+        completedQuestions,
+        reviewLater,
+        revisionDates: newRevisionDates
+      }, {
+        headers: { 'user-id': user.userId }
+      });
+      console.log('Revision date saved to backend');
+      
+      localStorage.setItem('vs-dsa-progress', JSON.stringify({
+        completedQuestions,
+        reviewLater,
+        revisionDates: newRevisionDates
+      }));
+    } catch (error) {
+      console.error('Error saving revision date:', error);
+    }
+  };
+
+  const handleLogin = async (userData, progressData) => {
+    console.log('Login received:', { userData, progressData });
+    setUser(userData);
+    
+    if (progressData) {
+      console.log('Setting progress from login response');
+      
+      const completed = progressData.completedQuestions || {};
+      const review = progressData.reviewLater || {};
+      const revision = progressData.revisionDates || {};
+      
+      console.log('Progress data:', { 
+        completed: Object.keys(completed).length,
+        review: Object.keys(review).length,
+        revision: Object.keys(revision).length
+      });
+      
+      setCompletedQuestions(completed);
+      setReviewLater(review);
+      setRevisionDates(revision);
+      
+      localStorage.setItem('vs-dsa-progress', JSON.stringify({
+        completedQuestions: completed,
+        reviewLater: review,
+        revisionDates: revision
+      }));
+    } else {
+      console.log('No progress in login response, fetching...');
+      await fetchUserProgress(userData.userId);
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setCompletedQuestions({});
+    setReviewLater({});
+    setRevisionDates({});
+    
+    localStorage.removeItem('vs-dsa-user');
+    localStorage.removeItem('vs-dsa-progress');
   };
 
   const checkOverdueRevisions = () => {
@@ -288,7 +402,6 @@ function App() {
     return patternProgress;
   };
 
-  // Show loading while checking for saved user
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-gray-900 to-blue-900 flex items-center justify-center p-4">
@@ -300,7 +413,6 @@ function App() {
     );
   }
 
-  // Show error if backend is not responding
   if (apiError) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-gray-900 to-blue-900 flex items-center justify-center p-4">
@@ -316,7 +428,7 @@ function App() {
               Retry Connection
             </button>
             <p className="text-sm text-gray-500">
-              Make sure your backend server is running on port 5000
+              Make sure your backend server is running
             </p>
           </div>
         </div>
@@ -324,7 +436,6 @@ function App() {
     );
   }
 
-  // Show login page if no user
   if (!user) {
     return <Login onLogin={handleLogin} serverUrl={serverUrl} />;
   }
@@ -340,7 +451,7 @@ function App() {
       {/* Header */}
       <header className="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg fixed w-full z-20">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
+          <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -353,39 +464,35 @@ function App() {
               <h1 className="text-2xl font-bold text-white">VS DSA Sheet</h1>
             </div>
             
-            <div className="flex flex-col md:flex-row md:items-center space-y-2 md:space-y-0 md:space-x-4">
-              {/* Streak Card */}
+            <div className="flex items-center space-x-4">
               <StreakCard streak={user.streak || 0} longestStreak={user.longestStreak || 0} />
               
               {progress.overdueCount > 0 && (
-                <div className="bg-red-600 text-white px-3 py-1 rounded-full text-sm animate-pulse self-start md:self-auto">
+                <div className="bg-red-600 text-white px-3 py-1 rounded-full text-sm animate-pulse">
                   {progress.overdueCount} Overdue
                 </div>
               )}
               
-              <div className="bg-gray-800 rounded-lg px-4 py-2 self-start md:self-auto">
+              <div className="bg-gray-800 rounded-lg px-4 py-2">
                 <span className="text-purple-400 font-semibold">{progress.completed}/{progress.total}</span>
                 <span className="text-gray-400 ml-2">({progress.percentage}%)</span>
               </div>
               
-              <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 self-start md:self-auto">
-                <button
-                  onClick={() => setShowRevision(true)}
-                  className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Revision
-                </button>
-                
-                <button
-                  onClick={() => setShowStats(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Stats
-                </button>
-              </div>
+              <button
+                onClick={() => setShowRevision(true)}
+                className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors"
+              >
+                Revision
+              </button>
+              
+              <button
+                onClick={() => setShowStats(true)}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
+              >
+                Stats
+              </button>
 
-              {/* User Info */}
-              <div className="flex items-center space-x-2 bg-gray-800 rounded-lg px-4 py-2 self-start md:self-auto">
+              <div className="flex items-center space-x-2 bg-gray-800 rounded-lg px-4 py-2">
                 <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold">{user.name?.[0]?.toUpperCase() || 'U'}</span>
                 </div>
@@ -405,8 +512,7 @@ function App() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <div className="flex pt-20 md:pt-16">
+      <div className="flex pt-16">
         <Sidebar 
           isOpen={isSidebarOpen}
           topics={topics}
@@ -425,8 +531,7 @@ function App() {
           overdueCount={progress.overdueCount}
         />
 
-        {/* Main Content Area */}
-        <main className={`flex-1 transition-all duration-300 ${isSidebarOpen ? 'md:ml-64' : 'ml-0'} p-4 md:p-6`}>
+        <main className={`flex-1 transition-all duration-300 ${isSidebarOpen ? 'ml-64' : 'ml-0'} p-6`}>
           {/* Stats Modal */}
           {showStats && (
             <StatsModal 
@@ -457,8 +562,8 @@ function App() {
               userId={user.userId}
               serverUrl={serverUrl}
               onSave={() => {
-                // Refresh or show success message
                 console.log('Solution saved');
+                fetchUserProgress(user.userId);
               }}
             />
           )}
@@ -503,11 +608,10 @@ function App() {
                 </select>
               </div>
               
-              <div className="flex items-end">
-                <div className="w-full bg-gray-700 rounded-lg px-3 py-2 text-gray-300 text-sm">
-                  <span className="block md:hidden">Total:</span>
-                  <span className="font-semibold">{filteredQuestions.length} of {questions.length}</span>
-                </div>
+              <div className="flex items-center justify-end">
+                <span className="text-gray-400">
+                  Showing {filteredQuestions.length} of {questions.length} questions
+                </span>
               </div>
             </div>
 
