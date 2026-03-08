@@ -16,7 +16,7 @@ import StreakCard from './components/StreakCard';
 import './App.css';
 
 // Configure axios
-const serverUrl = 'http://localhost:5000';
+const serverUrl = 'https://vsdsasheetserver.onrender.com';
 axios.defaults.baseURL = serverUrl;
 
 function App() {
