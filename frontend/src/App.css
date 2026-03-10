@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1f2937;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* Smooth transitions */
+* {
+    transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+/* Animation for checkmark */
+@keyframes checkmark {
+    0% {
+        transform: scale(0);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+.checkmark-animation {
+    animation: checkmark 0.3s ease-in-out;
+}
+
+/* Pulse animation for overdue items */
+@keyframes pulse-red {
+    0%, 100% {
+        background-color: rgba(239, 68, 68, 0.1);
+    }
+    50% {
+        background-color: rgba(239, 68, 68, 0.3);
+    }
+}
+
+.pulse-red {
+    animation: pulse-red 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Code editor customization */
+.prism-editor {
+    font-family: 'Fira Code', 'Fira Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.prism-editor textarea {
+    outline: none;
+}
+
+/* Token colors for syntax highlighting */
+.token.comment {
+    color: #6a9955;
+}
+
+.token.keyword {
+    color: #569cd6;
+}
+
+.token.string {
+    color: #ce9178;
+}
+
+.token.function {
+    color: #dcdcaa;
+}
+
+.token.number {
+    color: #b5cea8;
+}
+
+.token.operator {
+    color: #d4d4d4;
+}
+
+.token.class-name {
+    color: #4ec9b0;
+}
